@@ -168,6 +168,7 @@ trait AuthenticationSupport extends AuthorizationSupport {
           AuthenticationSupport.parseCreds(basicAuthEncoded)
         case _ => None
       }
+      logger.warning(s"[MKMK] exchAuth: optCreds: $optCreds, access: $access, hint: $hint")
       authenticate(optCreds, hint = hint) match {
         case Failure(t) => reject(AuthRejection(t))
         case Success(authenticatedIdentity) =>
@@ -194,6 +195,7 @@ trait AuthenticationSupport extends AuthorizationSupport {
       new ExchCallbackHandler(RequestInfo(creds.get, /*request, params,*/ AuthenticationSupport.isDbMigration /*, anonymousOk*/ , hint)),
       AuthenticationSupport.loginConfig)
     for (err <- Try(loginCtx.login()).failed) {
+      logger.warning(s"[MKMK] authenticate error: creds: $creds, hint: $hint, err: $err")
       return Failure(err)
     }
     val subject: Subject = loginCtx.getSubject // if we authenticated an api key, the subject contains the associated username

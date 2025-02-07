@@ -82,12 +82,13 @@ class IbmCloudModule extends LoginModule with AuthorizationSupport {
     handler: CallbackHandler,
     sharedState: java.util.Map[String, _],
     options: java.util.Map[String, _]): Unit = {
+    logger.warning("[MKMK] IbmCloudModule initialize")
     this.subject = subject
     this.handler = handler
   }
 
   override def login(): Boolean = {
-    //logger.debug("in IbmCloudModule.login() to try to authenticate an IBM cloud user")
+    logger.warning("[MKMK] IbmCloudModule login")
     val reqCallback = new RequestCallback
 
     handler.handle(Array(reqCallback))
@@ -141,10 +142,16 @@ class IbmCloudModule extends LoginModule with AuthorizationSupport {
     val creds: Creds = reqInfo.creds
     val (org, id) = IbmCloudAuth.compositeIdSplit(creds.id)
     if (org == "") {
-      if (hint.getOrElse("") == "exchangeNoOrgForMultLogin") Success(IamAuthCredentials(null, id, creds.token))
+      if (hint.getOrElse("") == "exchangeNoOrgForMultLogin") {
+        logger.warning("[MKMK] IBM authentication route 1. ORG: " + org + ", USER: " + id + ", TOKEN: " + reqInfo.creds.token)
+        Success(IamAuthCredentials(null, id, creds.token))
+      }
       else Failure(new OrgNotSpecifiedException)
     }
-    else if ((id == "iamapikey" || id == "iamtoken") && creds.token.nonEmpty) Success(IamAuthCredentials(org, id, creds.token))
+    else if ((id == "iamapikey" || id == "iamtoken") && creds.token.nonEmpty) {
+      logger.warning("[MKMK] IBM authentication route 2. ORG: " + org + ", USER: " + id + ", TOKEN: " + reqInfo.creds.token)
+      Success(IamAuthCredentials(org, id, creds.token))
+    }
     else Failure(new NotIbmCredsException)
   }
 }
