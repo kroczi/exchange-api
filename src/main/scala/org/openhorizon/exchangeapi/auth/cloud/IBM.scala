@@ -144,8 +144,8 @@ class IbmCloudModule extends LoginModule with AuthorizationSupport {
     val (org, id) = IbmCloudAuth.compositeIdSplit(creds.id)
     if (id != "iamapikey" && id != "iamtoken") Failure(new NotIbmCredsException)
     else if (org == "") {
+      logger.warning("[MKMK] IBM autentication route 1. ORG: " + org + ", USER: " + id + ", TOKEN: " + reqInfo.creds.token)
       if (hint.getOrElse("") == "exchangeNoOrgForMultLogin") {
-        logger.warning("[MKMK] IBM autentication route 1. ORG: " + org + ", USER: " + id + ", TOKEN: " + reqInfo.creds.token)
         Success(IamAuthCredentials(null, id, creds.token))
       }
       else Failure(new OrgNotSpecifiedException)
@@ -437,7 +437,7 @@ class IeamUiAuthenticationModule extends LoginModule with AuthorizationSupport {
       val reqInfo = reqCallback.request.get 
       val (org, id) = IbmCloudAuth.compositeIdSplit(reqInfo.creds.id)
 
-      if (org == "") throw new OrgNotSpecifiedException
+      // if (org == "") throw new OrgNotSpecifiedException
       if (reqInfo.isDbMigration && !Role.isSuperUser(reqInfo.creds.id)) throw new IsDbMigrationException()
       
       if (id == "iamapikey" || id == "iamtoken") throw new NotIeamUiCredsException
