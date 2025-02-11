@@ -106,7 +106,7 @@ trait MyOrganizations extends JacksonSupport with AuthenticationSupport {
             val accountsList: ListBuffer[String] = ListBuffer[String]()
             for (account <- reqBody) {accountsList += account.id}
             // filter on the orgs for orgs with those account ids
-            val q = OrgsTQ.filter(_.tags.map(tag => tag +>> "cloud_id") inSet accountsList.toSet)
+            val q = OrgsTQ.filter(_.tags.map(tag => tag +>> "ibmcloud_id") inSet accountsList.toSet)
             db.run(q.result).map({ list =>
               logger.debug("POST /myorgs result size: " + list.size)
               val orgs: Map[String, Org] = list.map(a => a.orgId -> a.toOrg).toMap
