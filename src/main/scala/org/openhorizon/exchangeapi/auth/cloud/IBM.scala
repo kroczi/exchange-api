@@ -39,12 +39,23 @@ final case class IamToken(accessToken: String, tokenType: Option[String] = None)
 // Info retrieved about the user from IAM (using the iam key or token).
 // For both IBM Cloud and ICP. All the rest apis that use this must be able to parse their results into this class.
 // The account field is set when using IBM Cloud, iss is set when using ICP.
-final case class IamUserInfo(account: Option[IamAccount], sub: Option[String], iss: Option[String], active: Option[Boolean]) { // Note: used to use the email field for ibm cloud, but switched to sub because it is common to both
-  def accountId: String = if (account.isDefined) account.get.bss else ""
+
+trait UserInfo {
+  def user: String
+  def accountIds: List[String]
+}
+
+final case class IamUserInfo(account: Option[IamAccount], sub: Option[String], iss: Option[String], active: Option[Boolean]) extends UserInfo { // Note: used to use the email field for ibm cloud, but switched to sub because it is common to both
+  def accountIds: List[String] = if (account.isDefined) List(account.get.bss) else List()
   def isActive: Boolean = active.getOrElse(false)
   def user: String = sub.getOrElse("")
 }
 final case class IamAccount(bss: String)
+
+final case class IeamUserInfo(sub: Option[String], groups: Option[List[String]]) extends UserInfo {
+  def accountIds: List[String] = groups.getOrElse(List())
+  def user: String = sub.getOrElse("")
+}
 
 /*
   Represents information from one IAM Account from the Multitenancy APIs - More information here: https://www.ibm.com/support/knowledgecenter/SSHKN6/iam/3.x.x/apis/mt_apis.html
@@ -198,11 +209,29 @@ object IbmCloudAuth {
           else
             getIamToken(authInfo)
         userInfo <- getUserInfo(token, authInfo)
-        user <- getOrCreateUser(authInfo.org, userInfo.user, userInfo.accountId, authInfo.keyType, Option(hint.getOrElse("")))
+        user <- getOrCreateUser(authInfo.org, userInfo.user, userInfo.accountIds, authInfo.keyType, Option(hint.getOrElse("")))
       } yield user.username // this is the composite org/username
     }
   }
 
+
+  def authenticateUser2(authInfo: IamAuthCredentials, hint: Option[String]): Try[String] = {
+    logger.debug("authenticateUser2(): attempting to authenticate with IBM Cloud with " + authInfo.org + "/" + authInfo.keyType)
+
+    /*
+     * This caching function takes a key and tries to retrieve it from the cache. If it is not found it runs the block of code provided,
+     * adds the result to the cache, and then returns it. We use cachingF so that we can return a Try value.
+     * See http://cb372.github.io/scalacache/docs/#basic-cache-operations for more info.
+     */
+    cachingF(authInfo.cacheKey)(ttl = None) {
+      for {
+        userInfo <- getUserInfo2(IamToken(authInfo.key), authInfo)
+        
+      // IIdentity(Creds("ieam", reqInfo.creds.token)).authenticate() // TODO mkmk: fallback
+        user <- getOrCreateUser(authInfo.org, userInfo.user, userInfo.accountIds, authInfo.keyType, Option(hint.getOrElse("")))
+      } yield user.username // this is the composite org/username
+    }
+  }
   // Note: the cache key is <org>/<keytype>:<apikey>, so in the rest of the code it is usually hard to know this value, except in the auth code path
   def removeUserKey(cacheKey: String): Unit = {
     remove(cacheKey) // does not throw an error if it doesn't exist
@@ -247,9 +276,9 @@ object IbmCloudAuth {
 
   // Using the IAM token get the ibm cloud account id (which we'll use to verify the exchange org) and users email (which we'll use as the exchange user)
   // For ICP IAM see: https://github.ibm.com/IBMPrivateCloud/roadmap/blob/master/feature-specs/security/security-services-apis.md
-  private def getUserInfo(token: IamToken, authInfo: IamAuthCredentials): Try[IamUserInfo] = {
+  private def getUserInfo(token: IamToken, authInfo: IamAuthCredentials): Try[UserInfo] = {
     // An ibm public cloud token, either from the UI or from the platform apikey we were given
-    var delayedReturn: Try[IamUserInfo] = Failure(new IamApiTimeoutException(ExchMsg.translate("iam.return.value.not.set", "GET identity/userinfo", iamRetryNum)))
+    var delayedReturn: Try[UserInfo] = Failure(new IamApiTimeoutException(ExchMsg.translate("iam.return.value.not.set", "GET identity/userinfo", iamRetryNum)))
     for (i <- 1 to iamRetryNum) {
       try {
         val iamUrl = "https://iam.cloud.ibm.com/identity/userinfo"
@@ -272,17 +301,45 @@ object IbmCloudAuth {
     }
     delayedReturn // if we tried the max times and never got a successful positive or negative, return what we last got
   }
+
+  // Using the IAM token get the ibm cloud account id (which we'll use to verify the exchange org) and users email (which we'll use as the exchange user)
+  // For ICP IAM see: https://github.ibm.com/IBMPrivateCloud/roadmap/blob/master/feature-specs/security/security-services-apis.md
+  private def getUserInfo2(token: IamToken, authInfo: IamAuthCredentials): Try[UserInfo] = {
+    // An ibm public cloud token, either from the UI or from the platform apikey we were given
+    var delayedReturn: Try[UserInfo] = Failure(new IamApiTimeoutException(ExchMsg.translate("iam.return.value.not.set", "GET identity/userinfo", iamRetryNum)))
+    for (i <- 1 to iamRetryNum) {
+      try {
+        val iamUrl = "https://dev-39624269.okta.com/oauth2/default/v1/userinfo"
+        logger.warning("[MKMK] IEAM autentication route. Attempt " + i + " retrieving IBM Cloud IAM userinfo for " + authInfo.org + "/iamtoken from " + iamUrl + " token " + token)
+        val response: HttpResponse[String] =
+          Http(iamUrl).header("Authorization", s"Bearer ${token.accessToken}")
+                      .header("Content-Type", "application/json")
+                      .asString
+        logger.warning("[MKMK] IEAM autentication route. " + iamUrl + " http code: " + response.code + ", body: " + response.body)
+        if (response.code == HttpCode.OK.intValue) {
+          // This api returns 200 even for an invalid token. Have to determine its validity via the 'active' field
+          val userInfo: IamUserInfo = parse(response.body).extract[IamUserInfo]
+          if (userInfo.user != "") return Success(userInfo)
+          else return Failure(new InvalidCredentialsException(ExchMsg.translate("invalid.iam.token")))
+        } else delayedReturn = Failure(new IamApiErrorException(response.body))
+      }
+      catch {
+          case e: Exception => delayedReturn = Failure(new IamApiErrorException(ExchMsg.translate("error.authenticating.iam.token", e.getMessage)))
+      }
+    }
+    delayedReturn // if we tried the max times and never got a successful positive or negative, return what we last got
+  }
   
 
-  def getOrCreateUser(orgId: String, username: String, accountId: String, keyType: String, hint: Option[String]): Try[UserRow] = {
-    logger.debug("Getting or creating exchange user from DB using IAM userinfo: " + username + ":" + accountId)
+  def getOrCreateUser(orgId: String, username: String, accountIds: List[String], keyType: String, hint: Option[String]): Try[UserRow] = {
+    logger.debug("Getting or creating exchange user from DB using IAM userinfo: " + username + ":" + accountIds.mkString(", "))
     // Form a DB query with the right logic to verify the org and either get or create the user.
     // This can throw exceptions OrgNotFound or IncorrectOrgFound
     val userQuery =
       for {
         //orgAcctId <- fetchOrg(orgId)
         //orgId <- verifyOrg(authInfo, userInfo, orgAcctId) // verify the org exists in the db, and in the public cloud case the cloud acct id of the apikey and the org entry match
-        orgId <- fetchVerifyOrg(orgId, accountId, keyType) // verify the org exists in the db, and in the public cloud case the cloud acct id of the apikey and the org entry match
+        orgId <- fetchVerifyOrg(orgId, accountIds, keyType) // verify the org exists in the db, and in the public cloud case the cloud acct id of the apikey and the org entry match
         userRow <- fetchUser(orgId, username)
         userAction <- {
           logger.debug(s"userRow: $userRow")
@@ -331,23 +388,23 @@ object IbmCloudAuth {
 
   // Verify that the cloud acct id of the cloud api key and the exchange org entry match
   // authInfo is the creds they passed in, userInfo is what was returned from the IAM calls, and orgAcctId is what we got from querying the org in the db
-  private def fetchVerifyOrg(orgId: String, accountId: String, keyType: String) = {
+  private def fetchVerifyOrg(orgId: String, accountIds: List[String], keyType: String) = {
     // IBM Cloud - we already have the account id from iam from the creds, and the account id of the exchange org
-    logger.debug(s"Fetching and verifying IBM public cloud org: $orgId, $accountId")
+    logger.debug(s"Fetching and verifying IBM public cloud org: $orgId, ${accountIds.mkString(", ")}")
     OrgsTQ.getOrgid(orgId).map(_.tags.+>>("ibmcloud_id")).result.headOption.flatMap({
       case None =>
         //logger.error(s"IAM authentication succeeded, but no matching exchange org with a cloud account id was found for ${orgId}")
         DBIO.failed(OrgNotFound(orgId))
       case Some(acctIdOpt) => // acctIdOpt is type Option[String]
         logger.debug(s"fetch org acctIdOpt: $acctIdOpt")
-        if (keyType == "iamtoken" && accountId == "") {
+        if (keyType == "iamtoken" && accountIds.isEmpty) {
           //todo: this is the case with tokens from the edge mgmt ui (because we don't get the accountId when we validate an iamtoken). The ui already verified the org and is using the right one,
           //      so there is no exposure there. But we still need to verify the org in case someone is spoofing being the ui. But to get here, the iamtoken has to be valid, just not for this org.
           //      With IECM on ICP/OCP, the only exposure is using an iamtoken from the cluster org to manage resources in the IBM org.
           DBIO.successful(orgId)
-        } else if (acctIdOpt.getOrElse("") != accountId) {
+        } else if (!accountIds.contains(acctIdOpt.getOrElse(""))) {
           //logger.error(s"IAM authentication succeeded, but the cloud account id of the org $orgAcctId does not match that of the cloud account ${userInfo.accountId}")
-          DBIO.failed(IncorrectOrgFound(orgId, accountId))
+          DBIO.failed(IncorrectOrgFound(orgId, accountIds.mkString(", ")))
         } else {
           DBIO.successful(orgId)
         }
@@ -440,18 +497,19 @@ class IeamUiAuthenticationModule extends LoginModule with AuthorizationSupport {
       // if (org == "") throw new OrgNotSpecifiedException
       if (reqInfo.isDbMigration && !Role.isSuperUser(reqInfo.creds.id)) throw new IsDbMigrationException()
       
-      if (id == "iamapikey" || id == "iamtoken") throw new NotIeamUiCredsException
-      if (!reqInfo.creds.token.startsWith("ieam-")) throw new NotIeamUiCredsException
-
-      
+      if (id != "ieam") throw new NotIeamUiCredsException      
       logger.warning("[MKMK] IEAM autentication route. ORG: " + org + ", USER: " + id + ", TOKEN: " + reqInfo.creds.token)
 
-      // IIdentity(Creds("IBM/ieam", reqInfo.creds.token.replace("ieam-", ""))).authenticate() // TODO mkmk
+      // IbmCloudAuth.getOrCreateUser(org, id, List("id-mycluster-account"), "iamtoken", Option(reqInfo.hint)) // TODO mkmk: 2nd and 3rd param
+      // identity = IUser(Creds(reqInfo.creds.id, "ieam-ui-password-placeholder"))
+
+      val username = IbmCloudAuth.authenticateUser2(IamAuthCredentials(null, id, reqInfo.creds.token), Option(reqInfo.hint))
+      logger.warning("[MKMK] IEAM autentication route. username: " + username.get)
+      identity = IUser(Creds(username.get, ""))
+
+      // IIdentity(Creds("IBM/ieam", reqInfo.creds.token)).authenticate() // TODO mkmk: fallback
 
       logger.warning("[MKMK] IEAM autentication route. Authenticate successful.")
-
-      IbmCloudAuth.getOrCreateUser(org, id, "id-mycluster-account", "iamtoken", Option(reqInfo.hint)) // TODO mkmk: 2nd and 3rd param
-      identity = IUser(Creds(reqInfo.creds.id, "ieam-ui-password-placeholder"))
       true
     }
     //logger.debug("Module.login(): loginResult=" + loginResult)
