@@ -16,6 +16,7 @@ case class IUser(creds: Creds) extends Identity {
     else AuthRoles.User
 
   override def authorizeTo(target: Target, access: Access)(implicit logger: LoggingAdapter): Try[Identity] = {
+    logger.warning("[MKMK] authorizeTo: target: " + target + "; isMyOrg: " + isMyOrg(target) + "; isPublic: " + target.isPublic + "; access: " + access + "; creds: " + creds)
     val requiredAccess: Access =
       // Transform any generic access into specific access
       if (isMyOrg(target) || target.isPublic) {
