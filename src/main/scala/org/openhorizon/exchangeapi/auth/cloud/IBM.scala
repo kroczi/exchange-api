@@ -506,7 +506,7 @@ class IeamUiAuthenticationModule extends LoginModule with AuthorizationSupport {
       // TODO: mkmk token
       val username = IbmCloudAuth.authenticateUser2(IamAuthCredentials(null, id, reqInfo.creds.token), Option(reqInfo.hint))
       logger.warning("[MKMK] IEAM autentication route. username: " + username.get)
-      identity = IUser(Creds(username.get, "ieam-ui-password-placeholder"))
+      identity = IUser(Creds(OrgAndId(org, username.get).toString(), ""))
 
       // IIdentity(Creds("IBM/ieam", reqInfo.creds.token)).authenticate() // TODO mkmk: fallback
 
