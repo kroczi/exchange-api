@@ -503,11 +503,15 @@ class IeamUiAuthenticationModule extends LoginModule with AuthorizationSupport {
       // IbmCloudAuth.getOrCreateUser(org, id, List("id-mycluster-account"), "iamtoken", Option(reqInfo.hint)) // TODO mkmk: 2nd and 3rd param
       // identity = IUser(Creds(reqInfo.creds.id, "ieam-ui-password-placeholder"))
 
-      val username = IbmCloudAuth.authenticateUser2(IamAuthCredentials(null, id, reqInfo.creds.token), Option(reqInfo.hint))
-      logger.warning("[MKMK] IEAM autentication route. username: " + username.get)
-      identity = IUser(Creds(username.get, ""))
+      // TODO: mkmk token
+      // val username = IbmCloudAuth.authenticateUser2(IamAuthCredentials(null, id, reqInfo.creds.token), Option(reqInfo.hint))
+      // logger.warning("[MKMK] IEAM autentication route. username: " + username.get)
+      // identity = IUser(Creds(username.get, ""))
 
       // IIdentity(Creds("IBM/ieam", reqInfo.creds.token)).authenticate() // TODO mkmk: fallback
+
+      IbmCloudAuth.getOrCreateUser(org, id, List("id-mycluster-account"), "iamtoken", Option(reqInfo.hint)) // TODO mkmk: 2nd and 3rd param
+      identity = IUser(Creds(reqInfo.creds.id, "ieam-ui-password-placeholder"))
 
       logger.warning("[MKMK] IEAM autentication route. Authenticate successful.")
       true

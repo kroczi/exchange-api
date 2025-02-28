@@ -120,7 +120,6 @@ trait MyOrganizations extends JacksonSupport with AuthenticationSupport {
   val myOrganizations: Route =
     path("myorgs") {
       post {
-        logger.error("[MKMK] POST/myorgs start")
         // set hint here to some key that states that no org is ok
         // UI should omit org at the beginning of credentials still have them put the slash in there
         try {
