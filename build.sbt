@@ -80,7 +80,10 @@ lazy val root = (project in file("."))
       "org.scalatest" %% "scalatest" % "[3.3.0-SNAP2,)" % "test",
       "org.scalatestplus" %% "junit-4-12" % "[3.3.0.0-SNAP2,)" % "test",
       "org.scalacheck" %% "scalacheck" % "[1.17.0,)" % "test",
-      "junit" % "junit" % "[4.13.2,)" % "test"
+      "junit" % "junit" % "[4.13.2,)" % "test",
+
+      // https://mvnrepository.com/artifact/org.pac4j/pac4j-oauth
+      "org.pac4j" % "pac4j-oauth" % "6.1.2" % "runtime"
     ),
     scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature"),
     javacOptions ++= Seq("-source", "17", "-target", "17", "-Xlint"),
