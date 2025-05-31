@@ -102,17 +102,14 @@ trait MyOrganizations extends JacksonSupport with AuthenticationSupport {
           logger.debug("Doing POST /myorgs")
           
           complete({
-            // getting list of accounts in req body from UI
-            val accountsList: ListBuffer[String] = ListBuffer[String]()
-            for (account <- reqBody) {accountsList += account.id}
-            // filter on the orgs for orgs with those account ids
-            val q = OrgsTQ.filter(_.tags.map(tag => tag +>> "cloud_id") inSet accountsList.toSet)
-            db.run(q.result).map({ list =>
-              logger.debug("POST /myorgs result size: " + list.size)
+            val excludedOrgIds = Set("IBM", "root")
+            val q = OrgsTQ.filter(org => !(org.orgid inSet excludedOrgIds))
+            db.run(q.result).map { list =>
+              logger.debug("POST /myorgs result size: {}", list.size)
               val orgs: Map[String, Org] = list.map(a => a.orgId -> a.toOrg).toMap
               val code: StatusCode = if (orgs.nonEmpty) StatusCodes.OK else StatusCodes.NotFound
               (code, GetOrgsResponse(orgs, 0))
-            })
+            }
           })
       }
     }
@@ -122,9 +119,15 @@ trait MyOrganizations extends JacksonSupport with AuthenticationSupport {
       post {
         // set hint here to some key that states that no org is ok
         // UI should omit org at the beginning of credentials still have them put the slash in there
-        exchAuth(TOrg("#"), Access.READ_MY_ORG, hint = "exchangeNoOrgForMultLogin") {
-          _ =>
-            postMyOrganizations
+        try {
+          exchAuth(TOrg("#"), Access.READ_MY_ORG, hint = "exchangeNoOrgForMultLogin") {
+            _ =>
+              postMyOrganizations
+          }
+        } catch {
+          case ex: Exception => 
+            logger.error("[MKMK] POST/myorgs error: ", ex)
+            throw ex
         }
       }
     }
