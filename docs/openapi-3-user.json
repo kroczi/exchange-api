@@ -4817,6 +4817,42 @@
             "description" : "not found"
           }
         }
+      },
+      "get" : {
+        "tags" : [ "organization" ],
+        "summary" : "Returns the orgs a user can view",
+        "description" : "Returns all the org definitions in the exchange that match the accounts the caller has access too. Can be run by any user. Request body is the response from /idmgmt/identity/api/v1/users/<user_ID>/accounts API.",
+        "operationId" : "myOrgsGetRoute",
+        "responses" : {
+          "200" : {
+            "description" : "response body",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/GetOrgsResponse"
+                },
+                "example" : {
+                  "orgs" : {
+                    "string" : {
+                      "label" : "",
+                      "description" : ""
+                    }
+                  },
+                  "lastIndex" : 0
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "invalid credentials"
+          },
+          "403" : {
+            "description" : "access denied"
+          },
+          "404" : {
+            "description" : "not found"
+          }
+        }
       }
     },
     "/v1/orgs/{orgid}/search/nodes/error/all" : {
