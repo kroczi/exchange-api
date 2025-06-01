@@ -5,7 +5,7 @@ import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.media.{Content, ExampleObject, Schema}
 import io.swagger.v3.oas.annotations.responses
 import io.swagger.v3.oas.annotations.parameters.RequestBody
-import jakarta.ws.rs.{POST, Path}
+import jakarta.ws.rs.{GET, POST, Path}
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.event.LoggingAdapter
 import org.apache.pekko.http.scaladsl.model.{StatusCode, StatusCodes}
@@ -18,6 +18,18 @@ import org.openhorizon.exchangeapi.table.ExchangePostgresProfile.api._
 
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.ExecutionContext
+import org.openhorizon.exchangeapi.auth.Identity
+import io.swagger.v3.oas.annotations.Parameter
+
+final case class OrgSummary(
+  label: String,
+  description: String
+)
+
+final case class GetOrgsSummaryResponse(
+  orgs: Map[String, OrgSummary],
+  lastIndex: Int
+)
 
 @Path("/v1/myorgs")
 @io.swagger.v3.oas.annotations.tags.Tag(name = "organization")
@@ -113,6 +125,69 @@ trait MyOrganizations extends JacksonSupport with AuthenticationSupport {
           })
       }
     }
+
+  // ====== GET /myorgs ================================
+  @GET
+  @Path("/v1/myorgs")
+  @Operation(summary = "Returns all the user orgs", description = "Returns all the user orgs.",
+    responses = Array(
+      new responses.ApiResponse(responseCode = "200", description = "response body",
+        content = Array(new Content(
+          examples = Array(
+            new ExampleObject(
+              value ="""{
+  "orgs": {
+    "string" : {
+      "orgType": "",
+      "label": "",
+      "description": ""
+    }
+  },
+  "lastIndex": 0
+}
+"""
+            )
+          ),
+          mediaType = "application/json",
+          schema = new Schema(implementation = classOf[GetOrgsSummaryResponse])
+        )
+        )),
+      new responses.ApiResponse(responseCode = "401", description = "invalid credentials"),
+      new responses.ApiResponse(responseCode = "403", description = "access denied"),
+      new responses.ApiResponse(responseCode = "404", description = "not found")))
+  def getMyOrganizations(@Parameter(hidden = true)identity: Identity): Route =
+    {
+      entity(as[List[IamAccountInfo]]) {
+        reqBody =>
+          logger.debug("Doing GET /myorgs")
+          
+          complete({
+            val excludedOrgTypes = Set("IBM")
+            val excludedOrgIds = Set("root")
+            val orgId = identity.getOrg
+
+            val orgQuery =
+              if (orgId == "") {
+                OrgsTQ
+                  .filter(org => !(org.orgType inSet excludedOrgTypes) && !(org.orgid inSet excludedOrgIds))
+                  .map(org => (org.orgid, org.label, org.description))
+              } else {
+                OrgsTQ
+                  .filter(_.orgid === orgId)
+                  .map(org => (org.orgid, org.label, org.description))
+              }
+
+            db.run(orgQuery.result).map { list =>
+              logger.debug("GET /myorgs result size: {}", list.size)
+              val orgs: Map[String, OrgSummary] = list.map {
+                case (id, label, desc) => id -> OrgSummary(label, desc)
+              }.toMap
+              val code: StatusCode = if (orgs.nonEmpty) StatusCodes.OK else StatusCodes.NotFound
+              (code, GetOrgsSummaryResponse(orgs, 0))
+            }
+          })
+      }
+    }
   
   val myOrganizations: Route =
     path("myorgs") {
@@ -127,6 +202,19 @@ trait MyOrganizations extends JacksonSupport with AuthenticationSupport {
         } catch {
           case ex: Exception => 
             logger.error("[MKMK] POST/myorgs error: ", ex)
+            throw ex
+        }
+      } ~
+      get {
+        // set hint here to some key that states that no org is ok
+        // UI should omit org at the beginning of credentials still have them put the slash in there
+        try {
+          exchAuth(TOrg("#"), Access.READ_MY_ORG, hint = "exchangeNoOrgForMultLogin") {
+            identity => getMyOrganizations(identity)
+          }
+        } catch {
+          case ex: Exception => 
+            logger.error("[MKMK] GET/myorgs error: ", ex)
             throw ex
         }
       }
