@@ -20,6 +20,7 @@ import scala.collection.mutable.ListBuffer
 import scala.concurrent.ExecutionContext
 import org.openhorizon.exchangeapi.auth.Identity
 import io.swagger.v3.oas.annotations.Parameter
+import io.swagger.v3.oas.annotations.Hidden
 
 final case class OrgSummary(
   label: String,
@@ -31,7 +32,6 @@ final case class GetOrgsSummaryResponse(
   lastIndex: Int
 )
 
-@Path("/v1/myorgs")
 @io.swagger.v3.oas.annotations.tags.Tag(name = "organization")
 trait MyOrganizations extends JacksonSupport with AuthenticationSupport {
   def db: Database
@@ -129,6 +129,7 @@ trait MyOrganizations extends JacksonSupport with AuthenticationSupport {
   // ====== GET /myorgs ================================
   @GET
   @Path("/v1/myorgs")
+  @Hidden
   @Operation(summary = "Returns all the user orgs", description = "Returns all the user orgs.",
     responses = Array(
       new responses.ApiResponse(responseCode = "200", description = "response body",
