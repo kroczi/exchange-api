@@ -157,36 +157,33 @@ trait MyOrganizations extends JacksonSupport with AuthenticationSupport {
       new responses.ApiResponse(responseCode = "404", description = "not found")))
   def getMyOrganizations(@Parameter(hidden = true)identity: Identity): Route =
     {
-      entity(as[List[IamAccountInfo]]) {
-        reqBody =>
-          logger.debug("Doing GET /myorgs")
-          
-          complete({
-            val excludedOrgTypes = Set("IBM")
-            val excludedOrgIds = Set("root")
-            val orgId = identity.getOrg
+      logger.debug("Doing GET /myorgs")
+      
+      complete({
+        val excludedOrgTypes = Set("IBM")
+        val excludedOrgIds = Set("root")
+        val orgId = identity.getOrg
 
-            val orgQuery =
-              if (orgId == "") {
-                OrgsTQ
-                  .filter(org => !(org.orgType inSet excludedOrgTypes) && !(org.orgid inSet excludedOrgIds))
-                  .map(org => (org.orgid, org.label, org.description))
-              } else {
-                OrgsTQ
-                  .filter(_.orgid === orgId)
-                  .map(org => (org.orgid, org.label, org.description))
-              }
+        val orgQuery =
+          // if (orgId == "") {
+            OrgsTQ
+              .filter(org => !(org.orgType inSet excludedOrgTypes) && !(org.orgid inSet excludedOrgIds))
+              .map(org => (org.orgid, org.label, org.description))
+          // } else {
+          //   OrgsTQ
+          //     .filter(_.orgid === orgId)
+          //     .map(org => (org.orgid, org.label, org.description))
+          // }
 
-            db.run(orgQuery.result).map { list =>
-              logger.debug("GET /myorgs result size: {}", list.size)
-              val orgs: Map[String, OrgSummary] = list.map {
-                case (id, label, desc) => id -> OrgSummary(label, desc)
-              }.toMap
-              val code: StatusCode = if (orgs.nonEmpty) StatusCodes.OK else StatusCodes.NotFound
-              (code, GetOrgsSummaryResponse(orgs, 0))
-            }
-          })
-      }
+        db.run(orgQuery.result).map { list =>
+          logger.debug("GET /myorgs result size: {}", list.size)
+          val orgs: Map[String, OrgSummary] = list.map {
+            case (id, label, desc) => id -> OrgSummary(label, desc)
+          }.toMap
+          val code: StatusCode = if (orgs.nonEmpty) StatusCodes.OK else StatusCodes.NotFound
+          (code, GetOrgsSummaryResponse(orgs, 0))
+        }
+      })
     }
   
   val myOrganizations: Route =
