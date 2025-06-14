@@ -92,7 +92,7 @@ lazy val root = (project in file("."))
       "junit" % "junit" % "[4.13.2,)" % Test
     ),
     scalacOptions ++= Seq("-unchecked", "-deprecation", "-feature"),
-    javacOptions ++= Seq("-source", "21", "-target", "21", "-Xlint"),
+    javacOptions ++= Seq("-source", "17", "-target", "17", "-Xlint"),
     //javaOptions ++= Seq("-Dconfig.file=/home/naphelps/git/exchange-api/target/config.json"),
     fork := true,
     Test / javaOptions ++= Seq("--add-opens", "java.base/java.net=ALL-UNNAMED"),
@@ -112,7 +112,7 @@ lazy val root = (project in file("."))
     Docker / daemonGroup    := "exchangegroup",
     Docker / daemonGroupGid := some("1001"),
     dockerExposedPorts     ++= Seq(8080),
-    dockerBaseImage         := "registry.access.redhat.com/ubi10-minimal:latest",
+    dockerBaseImage         := "registry.access.redhat.com/ubi9-minimal:latest",
     dockerEnvVars := Map("JAVA_OPTS" -> ""),   // this is here so JAVA_OPTS can be overridden on the docker run cmd with a value like: -Xmx1G
     // dockerEntrypoint ++= Seq("-Djava.security.auth.login.config=src/main/resources/jaas.config")  // <- had trouble getting this to work
     Docker / mappings ++= Seq((baseDirectory.value / "LICENSE.txt") -> "/1/licenses/LICENSE.txt"),
@@ -137,7 +137,7 @@ lazy val root = (project in file("."))
                                     Cmd("LABEL", "summary=" ++ summary.value),
                                     Cmd("LABEL", "vendor=" ++ vendor.value),
                                     Cmd("LABEL", "version=" ++ version.value),
-                                    Cmd("RUN", "mkdir -p /run/user/" ++ (Docker / daemonUserUid).value.get ++ " && microdnf update -y --nodocs --refresh && microdnf install -y --nodocs shadow-utils gettext java-21-openjdk openssl && microdnf clean all"),
+                                    Cmd("RUN", "mkdir -p /run/user/" ++ (Docker / daemonUserUid).value.get ++ " && microdnf update -y --nodocs --refresh && microdnf install -y --nodocs shadow-utils gettext java-17-openjdk openssl && microdnf clean all"),
                                     Cmd("USER", "root"),
                                     Cmd("RUN", "id -u " ++ (Docker / daemonUser).value ++ " 1>/dev/null 2>&1 || ((getent group 1001 1>/dev/null 2>&1 || (type groupadd 1>/dev/null 2>&1 && groupadd -g 1001 " ++ (Docker / daemonGroup).value ++ " || addgroup -g 1001 -S " ++ (Docker / daemonGroup).value ++ ")) && (type useradd 1>/dev/null 2>&1 && useradd --system --create-home --uid 1001 --gid 1001 " ++ (Docker / daemonUser).value ++ " || adduser -S -u 1001 -G " ++ (Docker / daemonGroup).value ++ " " ++ (Docker / daemonUser).value ++ "))"),
                                     Cmd("WORKDIR", "/etc/horizon/exchange"),
