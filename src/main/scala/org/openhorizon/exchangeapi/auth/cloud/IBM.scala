@@ -36,12 +36,16 @@ final case class IamToken(accessToken: String, tokenType: Option[String] = None)
 // Info retrieved about the user from IAM (using the iam key or token).
 // For both IBM Cloud and ICP. All the rest apis that use this must be able to parse their results into this class.
 // The account field is set when using IBM Cloud, iss is set when using ICP.
-final case class IamUserInfo(account: Option[IamAccount], sub: Option[String], iss: Option[String], active: Option[Boolean]) { // Note: used to use the email field for ibm cloud, but switched to sub because it is common to both
-  def accountId: String = if (account.isDefined) account.get.bss else ""
-  def isActive: Boolean = active.getOrElse(false)
-  def user: String = sub.getOrElse("")
+final case class IamUserInfo(
+  firstName: Option[String],
+  lastName: Option[String],
+  email: Option[String],
+  sub: Option[String],
+  groups: Option[Seq[String]]
+) {
+  def user: String = sub.orElse(email).getOrElse("")
+  def accountIds: Seq[String] = groups.getOrElse(Seq.empty)
 }
-final case class IamAccount(bss: String)
 
 /*
   Represents information from one IAM Account from the Multitenancy APIs - More information here: https://www.ibm.com/support/knowledgecenter/SSHKN6/iam/3.x.x/apis/mt_apis.html
@@ -176,10 +180,10 @@ object IbmCloudAuth {
       var delayedReturn: Try[IamUserInfo] = Failure(new IamApiTimeoutException(ExchMsg.translate("iam.return.value.not.set", "GET userinfo", 5)))
       for (i <- 1 to 5) {
         try {
-          val iamUrl: String = "getIcpIdentityProviderUrl" + "/v1/auth/userinfo"
+          val iamUrl: String = sys.env.getOrElse("EXCHANGE_USER_INFO_URL", "https://preprod.login.w3.ibm.com/v1.0/endpoint/default/userinfo") //"getIcpIdentityProviderUrl" + "/v1/auth/userinfo"
           //logger.debug("Retrieving ICP IAM userinfo from " + iamUrl + ", token: " + token.accessToken)
           logger.info("Attempt " + i + " retrieving ICP IAM userinfo for " + authInfo.org + "/iamtoken from " + iamUrl)
-          val response: HttpResponse[String] = Http(iamUrl).method("post")
+          val response: HttpResponse[String] = Http(iamUrl).method("get")
                                                            .header("Authorization", s"BEARER ${token.accessToken}")
                                                            .header("Content-Type", "application/json")
                                                            .asString
@@ -202,14 +206,14 @@ object IbmCloudAuth {
     // This can throw exceptions OrgNotFound or IncorrectOrgFound
 
     val org = authInfo.org
-    val accountId = userInfo.accountId
+    val accountIds = userInfo.accountIds
     val username = userInfo.user
 
     val userQuery =
       for {
         //orgAcctId <- fetchOrg(authInfo.org)
         //orgId <- verifyOrg(authInfo, userInfo, orgAcctId) // verify the org exists in the db, and in the public cloud case the cloud acct id of the apikey and the org entry match
-        orgId <- fetchVerifyOrg(org, accountId, Option(hint.getOrElse(""))) // verify the org exists in the db, and in the public cloud case the cloud acct id of the apikey and the org entry match
+        orgId <- fetchVerifyOrg(org, accountIds, Option(hint.getOrElse(""))) // verify the org exists in the db, and in the public cloud case the cloud acct id of the apikey and the org entry match
         userRow <- fetchUser(orgId, username)
         userAction <- {
           logger.debug(s"userRow: $userRow")
@@ -283,13 +287,13 @@ object IbmCloudAuth {
 
   // Verify that the cloud acct id of the cloud api key and the exchange org entry match
   // authInfo is the creds they passed in, userInfo is what was returned from the IAM calls, and orgAcctId is what we got from querying the org in the db
-  private def fetchVerifyOrg(org: String, accountId: String, hint: Option[String]) = {
+  private def fetchVerifyOrg(org: String, accountIds: Seq[String], hint: Option[String]) = {
     if (hint.getOrElse("") == "exchangeNoOrgForMultLogin") {
       DBIO.successful(null)
     }
     else {
       // replace this with checking against getUserAccounts that the org they're in matches the org they're trying to access
-      logger.debug(s"Fetching and verifying ICP/OCP org: $org, $accountId")
+      logger.debug(s"Fetching and verifying ICP/OCP org: $org, $accountIds")
       //if (authInfo.keyType == "iamtoken")
       if (org == "root") DBIO.successful(org)
       else {
@@ -298,7 +302,7 @@ object IbmCloudAuth {
               DBIO.failed(OrgNotFound(org))
             case Some(orgAccountID) =>
               logger.debug(s"fetch org acctId: $orgAccountID")
-              if (accountId == orgAccountID.getOrElse("")) 
+              if (accountIds.contains(orgAccountID.getOrElse("")))
                 DBIO.successful(org)
               else 
                 DBIO.failed(IncorrectOrgFoundMult(org))
