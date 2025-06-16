@@ -79,7 +79,7 @@ class IbmCloudModule extends LoginModule with AuthorizationSupport {
   }
 
   override def login(): Boolean = {
-    //logger.debug("in IbmCloudModule.login() to try to authenticate an IBM cloud user")
+    //logger.warning("in IbmCloudModule.login() to try to authenticate an IBM cloud user")
     val reqCallback = new RequestCallback
 
     handler.handle(Array(reqCallback))
@@ -142,10 +142,16 @@ class IbmCloudModule extends LoginModule with AuthorizationSupport {
     val creds: Creds = reqInfo.creds
     val (org, id) = IbmCloudAuth.compositeIdSplit(creds.id)
     if (org == "") {
-      if (hint.getOrElse("") == "exchangeNoOrgForMultLogin") Success(IamAuthCredentials(null, id, creds.token))
+      if (hint.getOrElse("") == "exchangeNoOrgForMultLogin") {
+        logger.warning("[MKMK] Token first path")
+        Success(IamAuthCredentials(null, id, creds.token))
+      }
       else Failure(new OrgNotSpecifiedException)
     }
-    else if (id == "iamtoken" && creds.token.nonEmpty) Success(IamAuthCredentials(org, id, creds.token))
+    else if (id == "iamtoken" && creds.token.nonEmpty) {
+        logger.warning("[MKMK] Token second path")
+      Success(IamAuthCredentials(org, id, creds.token))
+    }
     else Failure(new NotIbmCredsException)
   }
 }
@@ -166,7 +172,7 @@ object IbmCloudAuth {
   }
 
   def authenticateUser(authInfo: IamAuthCredentials, hint: Option[String]): Try[String] = {
-    logger.debug("authenticateUser(): attempting to authenticate with IBM Cloud with " + authInfo.org + "/" + authInfo.keyType)
+    logger.warning("authenticateUser(): attempting to authenticate with IBM Cloud with " + authInfo.org + "/" + authInfo.keyType)
 
     val userInfo = getUserInfo(IamToken(authInfo.key), authInfo)
     val user = getOrCreateUser(authInfo, userInfo.get, Option(hint.getOrElse("")))
@@ -181,13 +187,13 @@ object IbmCloudAuth {
       for (i <- 1 to 5) {
         try {
           val iamUrl: String = sys.env.getOrElse("EXCHANGE_USER_INFO_URL", "https://preprod.login.w3.ibm.com/v1.0/endpoint/default/userinfo") //"getIcpIdentityProviderUrl" + "/v1/auth/userinfo"
-          //logger.debug("Retrieving ICP IAM userinfo from " + iamUrl + ", token: " + token.accessToken)
-          logger.info("Attempt " + i + " retrieving ICP IAM userinfo for " + authInfo.org + "/iamtoken from " + iamUrl)
+          //logger.warning("Retrieving ICP IAM userinfo from " + iamUrl + ", token: " + token.accessToken)
+          logger.warning("Attempt " + i + " retrieving ICP IAM userinfo for " + authInfo.org + "/iamtoken from " + iamUrl)
           val response: HttpResponse[String] = Http(iamUrl).method("get")
                                                            .header("Authorization", s"BEARER ${token.accessToken}")
                                                            .header("Content-Type", "application/json")
                                                            .asString
-          logger.debug(iamUrl + " http code: " + response.code + ", body: " + response.body)
+          logger.warning(iamUrl + " http code: " + response.code + ", body: " + response.body)
           if (response.code == HttpCode.OK.intValue) return Success(parse(response.body).extract[IamUserInfo])
           else if (response.code == HttpCode.BAD_INPUT.intValue || response.code == HttpCode.BADCREDS.intValue || response.code == HttpCode.ACCESS_DENIED.intValue || response.code == HttpCode.NOT_FOUND.intValue) {
             // This IAM API returns BAD_INPUT (400) when the mechanics of the api call were successful, but the token was invalid
@@ -201,7 +207,7 @@ object IbmCloudAuth {
   }
 
   private def getOrCreateUser(authInfo: IamAuthCredentials, userInfo: IamUserInfo, hint: Option[String]): Try[UserRow] = {
-    logger.debug("Getting or creating exchange user from DB using IAM userinfo: " + userInfo)
+    logger.warning("Getting or creating exchange user from DB using IAM userinfo: " + userInfo)
     // Form a DB query with the right logic to verify the org and either get or create the user.
     // This can throw exceptions OrgNotFound or IncorrectOrgFound
 
@@ -216,7 +222,7 @@ object IbmCloudAuth {
         orgId <- fetchVerifyOrg(org, accountIds, Option(hint.getOrElse(""))) // verify the org exists in the db, and in the public cloud case the cloud acct id of the apikey and the org entry match
         userRow <- fetchUser(orgId, username)
         userAction <- {
-          logger.debug(s"userRow: $userRow")
+          logger.warning(s"userRow: $userRow")
           if (userRow.isEmpty) 
             createUser(orgId, username)
           else if(userRow.get.organization  == "root" && !userRow.get.isHubAdmin) 
@@ -253,7 +259,7 @@ object IbmCloudAuth {
 
     val awaitResult: Success[UserRow] =
       try {
-        //logger.debug("awaiting for DB query of ibm cloud creds for "+authInfo.org+"/"+userInfo.user+"...")
+        //logger.warning("awaiting for DB query of ibm cloud creds for "+authInfo.org+"/"+userInfo.user+"...")
         if (hint.getOrElse("") == "exchangeNoOrgForMultLogin") {
           val timestamp = ApiTime.nowUTCTimestamp
           Success(
@@ -268,7 +274,7 @@ object IbmCloudAuth {
                     username = username))
             //UserRow(userInfo.user, "", "", admin = false, hubAdmin = false, "", "", ""))
         } else Await.result(db.run(userQuery.transactionally), Duration(10, SECONDS))
-        //logger.debug("...back from awaiting for DB query of ibm cloud creds for "+authInfo.org+"/"+userInfo.user+".")
+        //logger.warning("...back from awaiting for DB query of ibm cloud creds for "+authInfo.org+"/"+userInfo.user+".")
       } catch {
         // Handle any exceptions, including db problems. Note: exceptions from this get caught in login() above
         case timeout: java.util.concurrent.TimeoutException =>
@@ -293,7 +299,7 @@ object IbmCloudAuth {
     }
     else {
       // replace this with checking against getUserAccounts that the org they're in matches the org they're trying to access
-      logger.debug(s"Fetching and verifying ICP/OCP org: $org, $accountIds")
+      logger.warning(s"Fetching and verifying ICP/OCP org: $org, $accountIds")
       //if (authInfo.keyType == "iamtoken")
       if (org == "root") DBIO.successful(org)
       else {
@@ -301,7 +307,7 @@ object IbmCloudAuth {
             case None =>
               DBIO.failed(OrgNotFound(org))
             case Some(orgAccountID) =>
-              logger.debug(s"fetch org acctId: $orgAccountID")
+              logger.warning(s"fetch org acctId: $orgAccountID")
               if (accountIds.contains(orgAccountID.getOrElse("")))
                 DBIO.successful(org)
               else 
@@ -312,7 +318,7 @@ object IbmCloudAuth {
   }
 
   private def fetchUser(org: String, username: String) = {
-    logger.debug("Fetching user: org=" + org + ", " + username)
+    logger.warning("Fetching user: org=" + org + ", " + username)
     UsersTQ
       .filter(u => u.organization === org && u.username === username)
       .result
@@ -321,7 +327,7 @@ object IbmCloudAuth {
 
   private def createUser(org: String, username: String) = {
     if(org != null) {
-      logger.debug("Creating user: org=" + org + ", " + username)
+      logger.warning("Creating user: org=" + org + ", " + username)
       val timestamp = ApiTime.nowUTCTimestamp
       val user: UserRow = 
         UserRow(createdAt = timestamp,
@@ -335,7 +341,7 @@ object IbmCloudAuth {
                 username = username)
       (UsersTQ += user).asTry.map(count => count.map(_ => user))
     } else {
-      logger.debug("ibmcloudmodule not creating user - null org")
+      logger.warning("ibmcloudmodule not creating user - null org")
       null
     }
   }
@@ -405,7 +411,7 @@ class IbmCloudModule extends LoginModule with AuthorizationSupport {
   }
 
   override def login(): Boolean = {
-    //logger.debug("in IbmCloudModule.login() to try to authenticate an IBM cloud user")
+    //logger.warning("in IbmCloudModule.login() to try to authenticate an IBM cloud user")
     val reqCallback = new RequestCallback
 
     handler.handle(Array(reqCallback))
@@ -492,7 +498,7 @@ object IbmCloudAuth {
   }
 
   def authenticateUser(authInfo: IamAuthCredentials, hint: Option[String]): Try[String] = {
-    logger.debug("authenticateUser(): attempting to authenticate with IBM Cloud with " + authInfo.org + "/" + authInfo.keyType)
+    logger.warning("authenticateUser(): attempting to authenticate with IBM Cloud with " + authInfo.org + "/" + authInfo.keyType)
 
     /*
      * This caching function takes a key and tries to retrieve it from the cache. If it is not found it runs the block of code provided,
@@ -519,7 +525,7 @@ object IbmCloudAuth {
   }
 
   def clearCache(): Try[Unit] = {
-    logger.debug(s"Clearing the IBM Cloud auth cache")
+    logger.warning(s"Clearing the IBM Cloud auth cache")
     removeAll().map(_ => ()) // i think this map() just transforms the removeAll() return of a future into Unit
   }
   
@@ -568,7 +574,7 @@ object IbmCloudAuth {
           Http(iamUrl).header("Authorization", s"BEARER ${token.accessToken}")
                       .header("Content-Type", "application/json")
                       .asString
-        logger.debug(iamUrl + " http code: " + response.code + ", body: " + response.body)
+        logger.warning(iamUrl + " http code: " + response.code + ", body: " + response.body)
         if (response.code == HttpCode.OK.intValue) {
           // This api returns 200 even for an invalid token. Have to determine its validity via the 'active' field
           val userInfo: IamUserInfo = parse(response.body).extract[IamUserInfo]
@@ -585,7 +591,7 @@ object IbmCloudAuth {
   
 
   private def getOrCreateUser(authInfo: IamAuthCredentials, userInfo: IamUserInfo, hint: Option[String], oidcToken: Option[IamToken]): Try[UserRow] = {
-    logger.debug("Getting or creating exchange user from DB using IAM userinfo: " + userInfo)
+    logger.warning("Getting or creating exchange user from DB using IAM userinfo: " + userInfo)
     // Form a DB query with the right logic to verify the org and either get or create the user.
     // This can throw exceptions OrgNotFound or IncorrectOrgFound
     val userQuery =
@@ -595,7 +601,7 @@ object IbmCloudAuth {
         orgId <- fetchVerifyOrg(authInfo, userInfo, Option(hint.getOrElse("")), Option(oidcToken.getOrElse(IamToken(null)))) // verify the org exists in the db, and in the public cloud case the cloud acct id of the apikey and the org entry match
         userRow <- fetchUser(orgId, userInfo)
         userAction <- {
-          logger.debug(s"userRow: $userRow")
+          logger.warning(s"userRow: $userRow")
           if (userRow.isEmpty) createUser(orgId, userInfo)
           else if(userRow.get.organization == "root" && !userRow.get.isHubAdmin) DBIO.failed(new InvalidCredentialsException(ExchMsg.translate("user.cannot.be.in.root.org"))) // only need to check hubadmin field because the root user is by default a hubadmin and org admins are not in the root org
           else DBIO.successful(Success(userRow.get)) // to produce error case below, instead use: createUser(orgId, userInfo)
@@ -629,7 +635,7 @@ object IbmCloudAuth {
 
     val awaitResult: Success[UserRow] =
       try {
-        //logger.debug("awaiting for DB query of ibm cloud creds for "+authInfo.org+"/"+userInfo.user+"...")
+        //logger.warning("awaiting for DB query of ibm cloud creds for "+authInfo.org+"/"+userInfo.user+"...")
         if (hint.getOrElse("") == "exchangeNoOrgForMultLogin") {
           val timestamp = ApiTime.nowUTCTimestamp
           Success(
@@ -644,7 +650,7 @@ object IbmCloudAuth {
                     username = userInfo.user))
             //UserRow(userInfo.user, "", "", admin = false, hubAdmin = false, "", "", ""))
         } else Await.result(db.run(userQuery.transactionally), Duration(Configuration.getConfig.getInt("api.cache.authDbTimeoutSeconds"), SECONDS))
-        //logger.debug("...back from awaiting for DB query of ibm cloud creds for "+authInfo.org+"/"+userInfo.user+".")
+        //logger.warning("...back from awaiting for DB query of ibm cloud creds for "+authInfo.org+"/"+userInfo.user+".")
       } catch {
         // Handle any exceptions, including db problems. Note: exceptions from this get caught in login() above
         case timeout: java.util.concurrent.TimeoutException =>
@@ -665,13 +671,13 @@ object IbmCloudAuth {
   // authInfo is the creds they passed in, userInfo is what was returned from the IAM calls, and orgAcctId is what we got from querying the org in the db
   private def fetchVerifyOrg(authInfo: IamAuthCredentials, userInfo: IamUserInfo, hint: Option[String], oidcToken: Option[IamToken]) = {
     // IBM Cloud - we already have the account id from iam from the creds, and the account id of the exchange org
-    logger.debug(s"Fetching and verifying IBM public cloud org: $authInfo, $userInfo")
+    logger.warning(s"Fetching and verifying IBM public cloud org: $authInfo, $userInfo")
     OrgsTQ.getOrgid(authInfo.org).map(_.tags.+>>("ibmcloud_id")).result.headOption.flatMap({
       case None =>
         //logger.error(s"IAM authentication succeeded, but no matching exchange org with a cloud account id was found for ${authInfo.org}")
         DBIO.failed(OrgNotFound(authInfo.org))
       case Some(acctIdOpt) => // acctIdOpt is type Option[String]
-        logger.debug(s"fetch org acctIdOpt: $acctIdOpt")
+        logger.warning(s"fetch org acctIdOpt: $acctIdOpt")
         if (authInfo.keyType == "iamtoken" && userInfo.accountId == "") {
           //todo: this is the case with tokens from the edge mgmt ui (because we don't get the accountId when we validate an iamtoken). The ui already verified the org and is using the right one,
           //      so there is no exposure there. But we still need to verify the org in case someone is spoofing being the ui. But to get here, the iamtoken has to be valid, just not for this org.
@@ -687,7 +693,7 @@ object IbmCloudAuth {
   }
 
   private def fetchUser(org: String, userInfo: IamUserInfo) = {
-    logger.debug("Fetching user: org=" + org + ", " + userInfo)
+    logger.warning("Fetching user: org=" + org + ", " + userInfo)
     UsersTQ
       .filter(u => u.organization === org &&
                    u.username === userInfo.user)
@@ -698,7 +704,7 @@ object IbmCloudAuth {
 
   private def createUser(org: String, userInfo: IamUserInfo) = {
     if(org != null) {
-      logger.debug("Creating user: org=" + org + ", " + userInfo)
+      logger.warning("Creating user: org=" + org + ", " + userInfo)
       val timestamp = ApiTime.nowUTCTimestamp
       val user: UserRow =
         UserRow(createdAt = timestamp,
@@ -712,7 +718,7 @@ object IbmCloudAuth {
                 username = userInfo.user)
       (UsersTQ += user).asTry.map(count => count.map(_ => user))
     } else {
-      logger.debug("ibmcloudmodule not creating user")
+      logger.warning("ibmcloudmodule not creating user")
       null
     }
   }
